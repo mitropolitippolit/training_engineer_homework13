@@ -1,2 +1,14 @@
 [all]
 localhost
+
+[app]
+
+[pkg]
+
+[ec2:children]
+app
+pkg
+
+[ec2:vars]
+ansible_ssh_user=ubuntu
+ansible_ssh_private_key_file="~/.ssh/id_rsa"

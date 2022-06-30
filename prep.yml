@@ -3,11 +3,10 @@
   hosts: localhost
   gather_facts: false
   tasks:
-
     - name: includes vars from a vault file
       include_vars: file=vars.vault
       no_log: false
-
+      tags: vault
 
 - name: prep stage
   hosts: localhost
@@ -20,10 +19,27 @@
   vars:
     custom_keypair_name: custom_keypair
     custom_pubkey_file_path: "~/.ssh/id_rsa.pub"
-    aws_instance_type: "t2.micro"
-    aws_image_id: "ami-08d4ac5b634553e16"
+    aws_instance_type: t2.micro
+    aws_image_id: ami-08d4ac5b634553e16
+    aws_sg_dict:
+      - name: app_sg
+        proto: tcp
+        ports: ['22','8080']
+        descr: pass ssh,http
+        cidr: 0.0.0.0/0
+      - name: pkg_sg
+        proto: tcp
+        ports: ['22']
+        descr: pass ssh
+        cidr: 0.0.0.0/0
+    aws_instance_dict:
+      - name: app01
+        sg_name: app_sg
+        tags: app
+      - name: pkg01
+        sg_name: pkg_sg
+        tags: pkg
   tasks:
-
     - name: checks required packages
       become: true
       apt: name={{item}} state=present
@@ -31,62 +47,51 @@
         - awscli
         - python3-boto3
         - python3-botocore
+      tags: pkg
 
     - name: checks key-pair
       ec2_key:
         name: "{{custom_keypair_name}}"
         key_material: "{{lookup('file',custom_pubkey_file_path)}}"
+      tags:
+        - ec2
+        - key
 
     - name: checks security group
       ec2_group:
-        name: app_sg
-        description: ssh and tomcat
+        name: "{{item.name}}"
+        description: "{{item.descr}}"
         rules:
-          - proto: tcp
-            ports:
-              - 8080
-            cidr_ip: 0.0.0.0/0
-            rule_desc: pass http alt
-          - proto: tcp
-            ports:
-              - 22
-            cidr_ip: 0.0.0.0/0
-            rule_desc: pass ssh
+          - proto: "{{item.proto}}"
+            ports: "{{item.ports}}"
+            cidr_ip: "{{item.cidr}}"
+      loop: "{{aws_sg_dict}}"
+      tags:
+        - ec2
+        - sg
 
-    - name: checks security group
-      ec2_group:
-        name: pkg_sg
-        description: ssh only
-        rules:
-          - proto: tcp
-            ports:
-              - 22  
-            cidr_ip: 0.0.0.0/0
-            rule_desc: pass ssh
-
-    - name: checks app instance
+    - name: checks instance
       ec2_instance:
-        name: app01
+        name: "{{item.name}}"
         key_name: "{{custom_keypair_name}}"
-        security_group: app_sg
+        security_group: "{{item.sg_name}}"
         instance_type: "{{aws_instance_type}}"
         image_id: "{{aws_image_id}}"
+        instance_tags: "{{item.tags}}"
+        wait: true
         network:
           assign_public_ip: true
-        tags:
-          Environment: Testing
-      register: app_res
+      loop: "{{aws_instance_dict}}"
+      register: provision
+      tags:
+        - ec2
+        - prov
 
-
-    - name: checks app instance
-      ec2_instance:
-        name: pkg01
-        key_name: "{{custom_keypair_name}}"
-        security_group: pkg_sg
-        instance_type: "{{aws_instance_type}}"
-        image_id: "{{aws_image_id}}"
-        network:
-          assign_public_ip: true
-        tags:
-          Environment: Testing
-      register: pkg_res
+    - name: waits for app ssh
+      wait_for:
+        host: "{{item['instances'][0]['public_ip']}}"
+        port: 22
+        delay: 10
+        timeout: 300
+        state: started
+      with_items: provision.results
