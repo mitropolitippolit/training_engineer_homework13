@@ -147,6 +147,7 @@
     build_dir_path: /var/tmp/build
     dockerfile_dst_path: "{{build_dir_path}}/Dockerfile"
     dockerhub_img_name: homework13:1.0.0
+  tasks:
     - name: checks the build dir
       file: state=directory dest={{build_dir_path}}
       when: hostvars[inventory_hostname].node_name == "pkg01"
