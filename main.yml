@@ -40,10 +40,14 @@
   tasks:
     - name: checks required packages
       become: true
-      apt: name={{item}} state=present
+      apt:
+        name: "{{item}}"
+        state: present
       loop:
         - python3-boto3
         - python3-botocore
+      loop_control:
+        label: "{{item}}"
       tags:
         - stage1
         - pkg
@@ -203,4 +207,5 @@
         state: started
       when: hostvars[inventory_hostname].node_name == "app01"
       tags:
+        - stage4
         - run
