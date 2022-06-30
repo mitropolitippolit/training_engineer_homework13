@@ -1,0 +1,195 @@
+---
+- name: Prep stage. Vars
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: includes vars from a vault file
+      include_vars: file=vars.vault
+      no_log: false
+      tags:
+        - prep
+        - vault
+
+- name: Stage one. Provision
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/aws:
+      aws_access_key: "{{aws_access_key}}"
+      aws_secret_key: "{{aws_secret_key}}"
+      region: "us-east-1"
+  vars:
+    custom_keypair_name: custom_keypair
+    custom_pubkey_file_path: "~/.ssh/id_rsa.pub"
+    aws_instance_type: t2.micro
+    aws_image_id: ami-08d4ac5b634553e16
+    aws_sg_dict:
+      - name: app_sg
+        proto: tcp
+        ports: ['22','8080']
+        descr: pass ssh,http
+        cidr: 0.0.0.0/0
+      - name: pkg_sg
+        proto: tcp
+        ports: ['22']
+        descr: pass ssh
+        cidr: 0.0.0.0/0
+    aws_instance_dict:
+      - name: app01
+        sg_name: app_sg
+      - name: pkg01
+        sg_name: pkg_sg
+  tasks:
+    - name: checks required packages
+      become: true
+      apt: name={{item}} state=present
+      loop:
+        - python3-boto3
+        - python3-botocore
+      tags:
+        - stage1
+        - pkg
+
+    - name: checks key-pair
+      ec2_key:
+        name: "{{custom_keypair_name}}"
+        key_material: "{{lookup('file',custom_pubkey_file_path)}}"
+      tags:
+        - stage1
+        - ec2
+        - key
+
+    - name: checks security group
+      ec2_group:
+        name: "{{item.name}}"
+        description: "{{item.descr}}"
+        rules:
+          - proto: "{{item.proto}}"
+            ports: "{{item.ports}}"
+            cidr_ip: "{{item.cidr}}"
+      loop: "{{aws_sg_dict}}"
+      tags:
+        - stage1
+        - ec2
+        - sg
+
+    - name: checks instance
+      ec2_instance:
+        name: "{{item.name}}"
+        key_name: "{{custom_keypair_name}}"
+        security_group: "{{item.sg_name}}"
+        instance_type: "{{aws_instance_type}}"
+        image_id: "{{aws_image_id}}"
+        wait: true
+        network:
+          assign_public_ip: true
+      loop: "{{aws_instance_dict}}"
+      tags:
+        - stage1
+        - ec2
+        - prov
+
+    - name: checks facts
+      ec2_instance_facts:
+       filters:
+         instance-state-name: running
+      register: aws_facts
+      tags:
+        - stage1
+        - ec2
+        - facts
+
+    - name: adds to hosts group
+      add_host:
+        hostname: "{{item.public_ip_address}}"
+        groups: ec2
+        node_name: "{{item.tags.Name}}"
+      loop: "{{aws_facts.instances}}"
+      loop_control:
+        label: "{{item.instance_id}}"
+      tags:
+        - stage1
+        - hosts
+
+- name: Stage two. Docker
+  hosts: ec2
+  gather_facts: false
+  become: true
+  tasks:
+    - name: checks the docker package
+      apt: name=docker.io state=present
+      tags:
+        - stage2
+        - pkg
+
+    - name: checks the python3-docker package
+      apt: name=python3-docker state=present
+      tags:
+        - stage2
+        - pkg
+
+    - name: checks the docker service
+      service: name=docker state=started
+      tags:
+        - stage2
+        - svc
+
+- name: Stage three. Checks the builder
+  hosts: ec2
+  become: true
+  vars:
+    build_dir_path: /var/tmp/build
+    dockerfile_dst_path: "{{build_dir_path}}/Dockerfile"
+    dockerhub_img_name: homework13:1.0.0
+  tasks:
+    - name: checks the build dir
+      file: state=directory dest={{build_dir_path}}
+      when: hostvars[inventory_hostname].node_name == "pkg01"
+      tags:
+        - stage3
+        - dir
+
+    - name: checks the Dockerfile
+      copy: src=Dockerfile dest={{dockerfile_dst_path}}
+      when: hostvars[inventory_hostname].node_name == "pkg01"
+      tags:
+        - stage3
+        - conf
+
+    - name: login to hub
+      docker_login:
+        username: "{{dockerhub_user}}"
+        password: "{{dockerhub_pass}}"
+      when: hostvars[inventory_hostname].node_name == "pkg01"
+      tags:
+        - stage3
+        - login
+
+    - name: checks the pkg container image
+      docker_image:
+        name: "{{dockerhub_user}}/{{dockerhub_img_name}}"
+        build: path="{{build_dir_path}}"
+        source: build
+        state: present
+        push: true
+      when: hostvars[inventory_hostname].node_name == "pkg01"
+      tags:
+        - stage3
+        - build
+
+- name: Stage four. Checks the web-server
+  hosts: ec2
+  become: true
+  tasks:
+    - name: checks the app container
+      docker_container:
+        name: app
+        image: "{{dockerhub_user}}/{{dockerhub_img_name}}"
+        command: /opt/tomcat/bin/catalina.sh run
+        ports:
+          - 8080:8080
+        state: started
+      when: hostvars[inventory_hostname].node_name == "app01"
+      tags:
+        - stage4
+        - run

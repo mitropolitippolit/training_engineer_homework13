@@ -20,12 +20,14 @@ Tested on:
 ### Pre
 
 
-        $ ssh-keygen
-        ...
+    $ ssh-keygen
+    ...
 
-        $ ansible-vault create vars.vault
-        ...
-        aws_access_key: SUPERSECRETIDHERE
-        aws_secret_key: SUPERSECRETKEYHERE
+    $ ansible-vault create vars.vault
+    ...
+    aws_access_key: SUPERSECRETIDHERE
+    aws_secret_key: SUPERSECRETKEYHERE
+    dockerhub_user: SUPERSECRETLOGINHERE
+    dockerhub_pass: SUPERSECRETPASSWORDHERE
 
-        $ ansible-playbook prep.yml --ask-vault-pass
+    $ ansible-playbook main.yml --ask-vault-pass
