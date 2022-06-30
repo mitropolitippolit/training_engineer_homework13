@@ -1,14 +1,12 @@
 ---
-- name: Prep stage. Vars
-  hosts: all
+- name: Variables
+  hosts: localhost
   gather_facts: false
   tasks:
     - name: includes vars from a vault file
       include_vars: file=vars.vault
-      no_log: false
-      tags:
-        - prep
-        - vault
+      no_log: true
+      tags: vars
 
 - name: Stage one. Provision
   hosts: localhost
@@ -116,18 +114,16 @@
   gather_facts: false
   become: true
   tasks:
-    - name: checks the docker package
+    - name: checks the required packages
       apt:
-        name: docker.io
+        name: "{{item}}"
         state: present
-      tags:
-        - stage2
-        - pkg
-
-    - name: checks the python3-docker package
-      apt:
-        name: python3-docker
-        state: present
+        update_cache: true
+      loop:
+        - docker.io
+        - python3-docker
+      loop_control:
+        label: "{{item}}"
       tags:
         - stage2
         - pkg
@@ -140,13 +136,22 @@
         - stage2
         - svc
 
+- name: Variables
+  hosts: ec2
+  gather_facts: false
+  tasks:
+    - name: includes vars from a vault file
+      include_vars: file=vars.vault
+      no_log: true
+      tags: vars
+
 - name: Stage three. Checks the builder
   hosts: ec2
   become: true
+  gather_facts: false
   vars:
     build_dir_path: /var/tmp/build
     dockerfile_dst_path: "{{build_dir_path}}/Dockerfile"
-    dockerhub_img_name: homework13:1.0.0
   tasks:
     - name: checks the build dir
       file: state=directory dest={{build_dir_path}}
@@ -186,6 +191,7 @@
 - name: Stage four. Checks the web-server
   hosts: ec2
   become: true
+  gather_facts: false
   tasks:
     - name: checks the app container
       docker_container:
