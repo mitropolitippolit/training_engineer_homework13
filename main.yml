@@ -1,6 +1,6 @@
 ---
 - name: Prep stage. Vars
-  hosts: localhost
+  hosts: all
   gather_facts: false
   tasks:
     - name: includes vars from a vault file
@@ -117,19 +117,25 @@
   become: true
   tasks:
     - name: checks the docker package
-      apt: name=docker.io state=present
+      apt:
+        name: docker.io
+        state: present
       tags:
         - stage2
         - pkg
 
     - name: checks the python3-docker package
-      apt: name=python3-docker state=present
+      apt:
+        name: python3-docker
+        state: present
       tags:
         - stage2
         - pkg
 
     - name: checks the docker service
-      service: name=docker state=started
+      service:
+        name: docker
+        state: started
       tags:
         - stage2
         - svc
@@ -141,7 +147,6 @@
     build_dir_path: /var/tmp/build
     dockerfile_dst_path: "{{build_dir_path}}/Dockerfile"
     dockerhub_img_name: homework13:1.0.0
-  tasks:
     - name: checks the build dir
       file: state=directory dest={{build_dir_path}}
       when: hostvars[inventory_hostname].node_name == "pkg01"
@@ -191,5 +196,4 @@
         state: started
       when: hostvars[inventory_hostname].node_name == "app01"
       tags:
-        - stage4
         - run
