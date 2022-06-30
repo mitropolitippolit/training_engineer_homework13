@@ -1,0 +1,92 @@
+---
+- name: checks vars
+  hosts: localhost
+  gather_facts: false
+  tasks:
+
+    - name: includes vars from a vault file
+      include_vars: file=vars.vault
+      no_log: false
+
+
+- name: prep stage
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/aws:
+      aws_access_key: "{{aws_access_key}}"
+      aws_secret_key: "{{aws_secret_key}}"
+      region: "us-east-1"
+  vars:
+    custom_keypair_name: custom_keypair
+    custom_pubkey_file_path: "~/.ssh/id_rsa.pub"
+    aws_instance_type: "t2.micro"
+    aws_image_id: "ami-08d4ac5b634553e16"
+  tasks:
+
+    - name: checks required packages
+      become: true
+      apt: name={{item}} state=present
+      loop:
+        - awscli
+        - python3-boto3
+        - python3-botocore
+
+    - name: checks key-pair
+      ec2_key:
+        name: "{{custom_keypair_name}}"
+        key_material: "{{lookup('file',custom_pubkey_file_path)}}"
+
+    - name: checks security group
+      ec2_group:
+        name: app_sg
+        description: ssh and tomcat
+        rules:
+          - proto: tcp
+            ports:
+              - 8080
+            cidr_ip: 0.0.0.0/0
+            rule_desc: pass http alt
+          - proto: tcp
+            ports:
+              - 22
+            cidr_ip: 0.0.0.0/0
+            rule_desc: pass ssh
+
+    - name: checks security group
+      ec2_group:
+        name: pkg_sg
+        description: ssh only
+        rules:
+          - proto: tcp
+            ports:
+              - 22  
+            cidr_ip: 0.0.0.0/0
+            rule_desc: pass ssh
+
+    - name: checks app instance
+      ec2_instance:
+        name: app01
+        key_name: "{{custom_keypair_name}}"
+        security_group: app_sg
+        instance_type: "{{aws_instance_type}}"
+        image_id: "{{aws_image_id}}"
+        network:
+          assign_public_ip: true
+        tags:
+          Environment: Testing
+      register: app_res
+
+
+    - name: checks app instance
+      ec2_instance:
+        name: pkg01
+        key_name: "{{custom_keypair_name}}"
+        security_group: pkg_sg
+        instance_type: "{{aws_instance_type}}"
+        image_id: "{{aws_image_id}}"
+        network:
+          assign_public_ip: true
+        tags:
+          Environment: Testing
+      register: pkg_res
